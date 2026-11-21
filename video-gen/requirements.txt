@@ -1,0 +1,4 @@
+anthropic>=2.12
+pydantic>=2
+pillow>=10
+# optional, nicer neural voices (needs network): edge-tts

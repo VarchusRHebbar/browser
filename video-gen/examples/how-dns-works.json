@@ -1,0 +1,36 @@
+{
+  "title": "How DNS Works",
+  "scenes": [
+    {"kind": "title", "heading": "How DNS Works", "left_label": "", "right_label": "", "stat_value": "",
+     "steps": [
+      {"text": "The internet's phone book", "narration": "Every time you type a website name, a quiet system called DNS turns it into a number your computer can actually use.", "side": "none"},
+      {"text": "Explained in two minutes", "narration": "Let's see how that lookup happens, step by step.", "side": "none"}]},
+    {"kind": "bullets", "heading": "Why we need it", "left_label": "", "right_label": "", "stat_value": "",
+     "steps": [
+      {"text": "Computers talk using IP addresses", "narration": "Computers find each other using IP addresses, strings of numbers like ninety three dot one eight four dot two one five dot one four.", "side": "none"},
+      {"text": "Humans remember names", "narration": "People, on the other hand, are much better at remembering names like example dot com.", "side": "none"},
+      {"text": "DNS maps names to addresses", "narration": "The Domain Name System, or DNS, is the shared directory that maps one to the other.", "side": "none"}]},
+    {"kind": "diagram", "heading": "A lookup, step by step", "left_label": "", "right_label": "", "stat_value": "",
+     "steps": [
+      {"text": "Your browser", "narration": "Your browser asks: what is the address for example dot com?", "side": "none"},
+      {"text": "Resolver", "narration": "The question goes to a resolver, usually run by your internet provider, which does the legwork for you.", "side": "none"},
+      {"text": "Root server", "narration": "The resolver asks a root server, which points it to the servers for dot com.", "side": "none"},
+      {"text": "TLD server", "narration": "The dot com servers point it to the name servers that are responsible for example dot com.", "side": "none"},
+      {"text": "Authoritative server", "narration": "Finally the authoritative server answers with the real IP address, and the resolver hands it back to your browser.", "side": "none"}]},
+    {"kind": "comparison", "heading": "Cached vs. uncached", "left_label": "First visit", "right_label": "Repeat visit", "stat_value": "",
+     "steps": [
+      {"text": "Several round trips", "narration": "On a first visit, the resolver may need several round trips across the internet.", "side": "left"},
+      {"text": "Answer served from cache", "narration": "Next time, the answer is already cached, so it comes back almost instantly.", "side": "right"},
+      {"text": "Tens of milliseconds", "narration": "An uncached lookup can take tens of milliseconds.", "side": "left"},
+      {"text": "Kept until the TTL expires", "narration": "Cached answers are kept until their time to live, or T T L, runs out.", "side": "right"}]},
+    {"kind": "stat", "heading": "Built to scale", "left_label": "", "right_label": "", "stat_value": "13",
+     "steps": [
+      {"text": "named root server identities", "narration": "There are just thirteen named root server identities.", "side": "none"},
+      {"text": "served by over a thousand machines worldwide", "narration": "But each one is copied across many locations, so well over a thousand machines answer root queries around the world.", "side": "none"}]},
+    {"kind": "bullets", "heading": "Recap", "left_label": "", "right_label": "", "stat_value": "",
+     "steps": [
+      {"text": "DNS turns names into IP addresses", "narration": "To recap: DNS turns names into IP addresses.", "side": "none"},
+      {"text": "Resolvers walk root, TLD, authoritative", "narration": "Resolvers walk from the root, to the top level domain, to the authoritative server.", "side": "none"},
+      {"text": "Caching makes it fast", "narration": "And caching makes the whole thing fast enough that you never notice it happening.", "side": "none"}]}
+  ]
+}
