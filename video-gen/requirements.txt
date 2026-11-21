@@ -1,4 +1,6 @@
 anthropic>=2.12
 pydantic>=2
 pillow>=10
+kokoro-onnx>=0.4   # default neural voice (model auto-downloads ~120 MB on first run)
+soundfile
 # optional, nicer neural voices (needs network): edge-tts

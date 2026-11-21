@@ -76,3 +76,13 @@ def test_generate_script_reports_refusal(monkeypatch):
     monkeypatch.setitem(sys.modules, "anthropic", fake)
     with pytest.raises(script_mod.ScriptGenerationError):
         script_mod.generate_script("x")
+
+
+def test_kokoro_voice(tmp_path):
+    pytest.importorskip("kokoro_onnx")
+    from explainer import tts
+    if not all((tts.KOKORO_DIR / f).exists() for f in tts.KOKORO_FILES):
+        pytest.skip("Kokoro model not downloaded")
+    out = tmp_path / "k.wav"
+    tts.synthesize("Hello from the explainer.", out, "kokoro")
+    assert tts.duration(out) > 0.5

@@ -5,7 +5,7 @@ Give it a topic and it produces a narrated, captioned MP4 explainer video.
 ```
 topic ──► Claude writes a scene-by-scene script (structured JSON)
       ──► Pillow renders each scene, revealing one element per narration beat
-      ──► TTS reads the narration (espeak-ng offline, or edge-tts neural voices)
+      ──► Kokoro neural TTS reads the narration offline (espeak-ng / edge-tts optional)
       ──► ffmpeg turns each beat into a clip and joins them into one MP4
 ```
 
@@ -19,6 +19,8 @@ pip install -r requirements.txt
 sudo apt-get install ffmpeg espeak-ng      # macOS: brew install ffmpeg espeak-ng
 export ANTHROPIC_API_KEY=...               # or `ant auth login`
 ```
+
+On the first render, the Kokoro voice model (~120 MB) downloads from GitHub into `~/.cache/explainer/kokoro`; set `EXPLAINER_CACHE` to put it elsewhere. If the download fails, the tool falls back to espeak-ng.
 
 ## Usage
 
@@ -42,8 +44,9 @@ Useful flags:
 
 | Flag | Default | Notes |
 |---|---|---|
-| `--tts espeak\|edge\|silent` | `espeak` | `edge` needs `pip install edge-tts` and network access; `silent` times each step from its word count |
-| `--voice` | engine default | e.g. `en-gb` (espeak) or `en-US-GuyNeural` (edge) |
+| `--tts kokoro\|espeak\|edge\|silent` | `kokoro` | `kokoro` is an offline neural voice; `espeak` sounds robotic but is tiny; `edge` needs `pip install edge-tts` and network access; `silent` times each step from its word count |
+| `--voice` | `af_heart` | Kokoro voices: `af_*`/`am_*` US female/male, `bf_*`/`bm_*` UK (`--list-voices` shows all). For espeak: `en-gb`; for edge: `en-US-GuyNeural` |
+| `--speed` | `1.0` | Kokoro speech rate, e.g. `0.9` for slower, more deliberate narration |
 | `--size` | `1920x1080` | e.g. `1080x1920` for vertical shorts, `1280x720` for faster renders |
 | `--no-captions` | captions on | burned-in narration captions |
 | `--model` / `--effort` | `claude-opus-5-5` / `medium` | model and effort level used to write the script |
@@ -66,7 +69,8 @@ See `examples/how-dns-works.json` for a full example.
 ## Notes
 
 - Script requests use server-side refusal fallbacks (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`). If the model declines a topic, the API reruns the request on a fallback model. Remove those two arguments in `generate_script` if you'd rather not use them.
-- Steps render in parallel (`-j`). A 2-minute 1080p video takes about 30 seconds on 4 cores.
+- Every narration clip is loudness-normalized to -16 LUFS, so the volume stays even from scene to scene.
+- Steps render in parallel (`-j`). On 4 CPU cores, a 2-minute 1080p video takes about 1.5 minutes with Kokoro and about 30 seconds with espeak.
 
 ## Tests
 

@@ -29,8 +29,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--audience", default="curious beginners", help="who the video is for")
     p.add_argument("--model", default="claude-opus-5-5")
     p.add_argument("--effort", default="medium", choices=["low", "medium", "high", "xhigh", "max"])
-    p.add_argument("--tts", default="espeak", choices=["espeak", "edge", "silent"], help="narration voice engine")
-    p.add_argument("--voice", help="voice name for the TTS engine (e.g. en-gb, en-US-GuyNeural)")
+    p.add_argument("--tts", default="kokoro", choices=["kokoro", "espeak", "edge", "silent"],
+                   help="narration voice engine (default kokoro: offline neural voice)")
+    p.add_argument("--voice", help="voice for the TTS engine (kokoro: af_heart, am_michael, bf_emma, bm_george, ...)")
+    p.add_argument("--speed", type=float, default=1.0, help="speech rate for kokoro (e.g. 0.9 slower, 1.1 faster)")
+    p.add_argument("--list-voices", action="store_true", help="list kokoro voices and exit")
     p.add_argument("--size", default="1920x1080", help="WIDTHxHEIGHT (default 1920x1080)")
     p.add_argument("--fps", type=int, default=30)
     p.add_argument("--no-captions", action="store_true", help="don't burn narration captions into the video")
@@ -38,6 +41,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-j", "--jobs", type=int, default=4, help="parallel render jobs")
     a = p.parse_args(argv)
 
+    if a.list_voices:
+        from .tts import _get_kokoro
+        print("\n".join(sorted(v for v in _get_kokoro().get_voices() if v[:2] in ("af", "am", "bf", "bm"))))
+        return 0
     if not a.topic and not a.script:
         p.error("give a topic, or --script path/to/script.json")
 
@@ -64,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
     renderer = Renderer(w, h, captions=not a.no_captions)
     work = a.keep_workdir or Path(tempfile.mkdtemp(prefix="explainer-"))
     try:
-        build_video(script, base, work, renderer=renderer, tts_backend=a.tts, voice=a.voice,
+        build_video(script, base, work, renderer=renderer, tts_backend=a.tts, voice=a.voice, speed=a.speed,
                     fps=a.fps, jobs=a.jobs, log=lambda m: print(m, file=sys.stderr))
     finally:
         if not a.keep_workdir:

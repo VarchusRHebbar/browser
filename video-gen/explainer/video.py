@@ -38,8 +38,9 @@ def build_video(
     workdir: Path,
     *,
     renderer: Renderer,
-    tts_backend: str = "espeak",
+    tts_backend: str = "kokoro",
     voice: str | None = None,
+    speed: float = 1.0,
     fps: int = 30,
     jobs: int = 4,
     log: Callable[[str], None] = print,
@@ -56,11 +57,14 @@ def build_video(
         stem = workdir / f"s{si:02d}_{st_i:02d}"
         png, wav, mp4 = stem.with_suffix(".png"), stem.with_suffix(".wav"), stem.with_suffix(".mp4")
         renderer.render(scene, st_i, si, n, script.title).save(png)
-        tts.synthesize(step.narration, wav, tts_backend, voice)
+        tts.synthesize(step.narration, wav, tts_backend, voice, speed)
         last = st_i == len(scene.steps) - 1
         seconds = tts.duration(wav) + PAUSE_AFTER_STEP + (PAUSE_AFTER_SCENE if last else 0)
         _clip(png, wav, mp4, seconds, fade=st_i == 0, fps=fps)
         return mp4
+
+    if tts_backend == "kokoro" and not tts.kokoro_available():
+        tts_backend, voice = "espeak", None
 
     log(f"Rendering {len(tasks)} steps across {n} scenes ...")
     with ThreadPoolExecutor(max_workers=jobs) as pool:
