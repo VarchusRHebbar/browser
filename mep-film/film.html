@@ -5,7 +5,7 @@
 </head><body>
 <canvas id="c" width="1920" height="1080"></canvas>
 <script>
-const W = 1920, H = 1080, DURATION = 66;
+const W = 1920, H = 1080, DURATION = 78.62;
 const cv = document.getElementById('c');
 const ctx = cv.getContext('2d');
 
@@ -427,8 +427,14 @@ function S7(g,t,a){
 
 // ---------- timeline ----------
 const SCENES = [
-  [S0, 0, 7.5], [S1, 7, 17], [S2, 16.5, 26], [S3, 25.5, 35.5],
-  [S4, 35, 45], [S5, 44.5, 53], [S6, 52.5, 59.5], [S7, 59, 66]
+  [S0, 0.0, 9.62],
+  [S1, 9.12, 20.78],
+  [S2, 20.28, 32.34],
+  [S3, 31.84, 43.71],
+  [S4, 43.21, 55.0],
+  [S5, 54.5, 64.55],
+  [S6, 64.05, 71.55],
+  [S7, 71.05, 78.62]
 ];
 function inkTransition(g, t){
   // a drifting ink bloom over each scene boundary

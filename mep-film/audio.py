@@ -1,5 +1,5 @@
 import numpy as np, wave
-sr=44100; D=66; n=sr*D; t=np.arange(n)/sr
+sr=44100; D=78.62; n=int(sr*D); t=np.arange(n)/sr
 rng=np.random.default_rng(3)
 out=np.zeros(n)
 # drone (D2 + A2) breathing
@@ -16,7 +16,7 @@ def pluck(t0,f,amp):
     s=(np.sin(ph)+0.45*np.sin(2*ph)*np.exp(-tt*3)+0.2*np.sin(3*ph)*np.exp(-tt*5))
     s*=np.exp(-tt*1.6)*np.minimum(1,tt*400)
     out[i:i+len(tt)]+=amp*s
-cues=[0,7,16.5,25.5,35,44.5,52.5,59]
+cues=[0.0, 9.12, 20.28, 31.84, 43.21, 54.5, 64.05, 71.05]
 tt0=1.0
 while tt0<D-4:
     near=min(abs(tt0-c) for c in cues)
