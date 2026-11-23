@@ -1,0 +1,464 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,700;1,500;1,700&family=Cormorant+SC:wght@600&display=swap" rel="stylesheet">
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+const W = 1920, H = 1080, DURATION = 66;
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+
+// ---------- utilities ----------
+function rng(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const clamp01 = x => x < 0 ? 0 : x > 1 ? 1 : x;
+const sm = x => { x = clamp01(x); return x*x*(3-2*x); };
+const eo = x => { x = clamp01(x); return 1 - Math.pow(1-x, 3); };
+const pr = (t,a,b) => clamp01((t-a)/(b-a));
+const lerp = (a,b,t) => a + (b-a)*t;
+const R0 = rng(7);
+const NT = Array.from({length:512}, () => R0());
+function noise1(x){ const i=Math.floor(x), f=x-i, u=f*f*(3-2*f); return lerp(NT[i&511], NT[(i+1)&511], u); }
+function fbm(x){ return noise1(x)*0.55 + noise1(x*2.1+17)*0.28 + noise1(x*4.3+41)*0.17; }
+function off(w,h){ const c=document.createElement('canvas'); c.width=w; c.height=h; return c; }
+
+const INK = (a) => `rgba(22,19,17,${a})`;
+const INDIGO = (a) => `rgba(38,58,84,${a})`;
+const VERM = (a) => `rgba(186,42,30,${a})`;
+const PAPER = '#ece2ca';
+
+// ---------- paper ----------
+const paper = (() => {
+  const c = off(W,H), g = c.getContext('2d'), r = rng(11);
+  g.fillStyle = PAPER; g.fillRect(0,0,W,H);
+  const id = g.getImageData(0,0,W,H), d = id.data;
+  for (let i=0;i<d.length;i+=4){ const n=(r()-0.5)*16; d[i]+=n; d[i+1]+=n; d[i+2]+=n*0.9; }
+  g.putImageData(id,0,0);
+  for (let i=0;i<2600;i++){ // fibres
+    const x=r()*W, y=r()*H, a=r()*Math.PI, l=6+r()*28;
+    g.strokeStyle = r()<0.5 ? 'rgba(120,100,70,0.07)' : 'rgba(255,250,235,0.12)';
+    g.lineWidth = 0.6+r(); g.beginPath(); g.moveTo(x,y);
+    g.quadraticCurveTo(x+Math.cos(a)*l*0.5+r()*4, y+Math.sin(a)*l*0.5+r()*4, x+Math.cos(a)*l, y+Math.sin(a)*l); g.stroke();
+  }
+  for (let i=0;i<7;i++){ // faint water stains
+    const x=r()*W, y=r()*H, rad=120+r()*260;
+    const gr=g.createRadialGradient(x,y,rad*0.6,x,y,rad);
+    gr.addColorStop(0,'rgba(140,110,70,0)'); gr.addColorStop(0.92,'rgba(140,110,70,0.02)'); gr.addColorStop(1,'rgba(140,110,70,0)');
+    g.fillStyle=gr; g.fillRect(x-rad,y-rad,rad*2,rad*2);
+  }
+  const v=g.createRadialGradient(W/2,H/2,H*0.35,W/2,H/2,H*1.05);
+  v.addColorStop(0,'rgba(60,40,20,0)'); v.addColorStop(1,'rgba(60,40,20,0.32)');
+  g.fillStyle=v; g.fillRect(0,0,W,H);
+  return c;
+})();
+
+// ---------- brush ----------
+function prepPath(pts){
+  const L=[0]; for(let i=1;i<pts.length;i++){ L.push(L[i-1]+Math.hypot(pts[i][0]-pts[i-1][0], pts[i][1]-pts[i-1][1])); }
+  return {pts, L, total:L[L.length-1]};
+}
+function pointAt(P, d){
+  const {pts,L}=P; if(d<=0) return pts[0]; if(d>=P.total) return pts[pts.length-1];
+  let i=1; while(L[i]<d) i++;
+  const f=(d-L[i-1])/(L[i]-L[i-1]||1);
+  return [lerp(pts[i-1][0],pts[i][0],f), lerp(pts[i-1][1],pts[i][1],f)];
+}
+// Brush stroke: tapered, pressure-varied, with dry-brush bristle streaks.
+function brush(g, P, progress, width, color, opts={}){
+  progress = clamp01(progress); if(progress<=0) return;
+  const seed = opts.seed||1, dry = opts.dry ?? 0.5, alpha = opts.alpha ?? 0.85;
+  const end = P.total*progress, step = Math.max(1, width*0.22);
+  g.fillStyle = color(alpha*0.22);
+  for(let d=0; d<=end; d+=step){
+    const u = d/P.total;
+    const taper = Math.min(1, u*7+0.15) * Math.min(1, (1-u)*5+0.2);
+    const press = 0.75 + 0.45*noise1(d*0.012+seed*13);
+    const r = Math.max(0.6, width*0.5*taper*press);
+    const [x,y] = pointAt(P,d);
+    g.beginPath(); g.arc(x,y,r,0,Math.PI*2); g.fill();
+  }
+  // bristle streaks
+  const nb = Math.max(2, Math.round(width/3));
+  for(let b=0;b<nb;b++){
+    const o = (b/(nb-1)-0.5)*width*0.85;
+    g.strokeStyle = color(alpha*(0.25+0.35*noise1(b*3.7+seed)));
+    g.lineWidth = Math.max(0.6, width/nb*0.9);
+    g.beginPath(); let started=false;
+    for(let d=0; d<=end; d+=step*2){
+      const gap = noise1(d*0.02 + b*9 + seed*5) < dry*0.45; // dry-brush gaps
+      const a = pointAt(P,d), c2 = pointAt(P,Math.min(P.total,d+1));
+      const nx = -(c2[1]-a[1]), ny = c2[0]-a[0], nl = Math.hypot(nx,ny)||1;
+      const u = d/P.total, taper = Math.min(1,u*7+0.15)*Math.min(1,(1-u)*5+0.2);
+      const x = a[0]+nx/nl*o*taper, y = a[1]+ny/nl*o*taper;
+      if(gap){ started=false; continue; }
+      if(!started){ g.moveTo(x,y); started=true; } else g.lineTo(x,y);
+    }
+    g.stroke();
+  }
+}
+function line(x1,y1,x2,y2,n=12,wob=2,seed=1){
+  const pts=[]; for(let i=0;i<=n;i++){ const f=i/n; pts.push([lerp(x1,x2,f)+(noise1(seed*7+i*0.9)-0.5)*wob, lerp(y1,y2,f)+(noise1(seed*11+i*0.9)-0.5)*wob]); }
+  return prepPath(pts);
+}
+function bezierPts(spec, n=60){ // spec: array of points; Catmull-Rom smoothing
+  const out=[];
+  for(let i=0;i<spec.length-1;i++){
+    const p0=spec[Math.max(0,i-1)], p1=spec[i], p2=spec[i+1], p3=spec[Math.min(spec.length-1,i+2)];
+    const seg = Math.max(4, Math.round(n/(spec.length-1)));
+    for(let k=0;k<seg;k++){ const t=k/seg, t2=t*t, t3=t2*t;
+      out.push([0,1].map(j=>0.5*((2*p1[j])+(-p0[j]+p2[j])*t+(2*p0[j]-5*p1[j]+4*p2[j]-p3[j])*t2+(-p0[j]+3*p1[j]-3*p2[j]+p3[j])*t3)));
+    }
+  }
+  out.push(spec[spec.length-1]); return prepPath(out);
+}
+
+// ink wash blob (irregular, soft)
+function blob(g, x, y, r, color, a, seed=1, blur=18){
+  g.save(); g.filter = `blur(${blur}px)`; g.fillStyle = color(a); g.beginPath();
+  for(let i=0;i<=48;i++){ const th=i/48*Math.PI*2; const rr=r*(0.75+0.45*noise1(seed*31+Math.cos(th)*1.7+Math.sin(th)*1.3+5));
+    const px=x+Math.cos(th)*rr, py=y+Math.sin(th)*rr; i?g.lineTo(px,py):g.moveTo(px,py); }
+  g.fill(); g.restore();
+}
+
+// ---------- mountains (pre-rendered layers) ----------
+function mountainLayer(seed, baseY, amp, freq, dark, blurPx){
+  const c = off(W+400,H), g = c.getContext('2d');
+  const top = [];
+  for(let x=0;x<=W+400;x+=6){ const n=fbm(x*freq+seed*100); const peak=Math.pow(n,1.6); top.push([x, baseY - peak*amp]); }
+  // body wash
+  g.filter=`blur(${blurPx}px)`;
+  const grad = g.createLinearGradient(0, baseY-amp, 0, baseY+260);
+  grad.addColorStop(0, INK(dark)); grad.addColorStop(0.45, INK(dark*0.55)); grad.addColorStop(1, INK(0));
+  g.fillStyle=grad; g.beginPath(); g.moveTo(0,H);
+  top.forEach(p=>g.lineTo(p[0],p[1])); g.lineTo(W+400,H); g.closePath(); g.fill();
+  // ridge texture strokes (cun)
+  g.filter=`blur(${Math.max(0.5,blurPx*0.3)}px)`;
+  const r = rng(seed*99);
+  for(let i=0;i<top.length;i+=3){
+    const [x,y]=top[i]; if(r()<0.5) continue;
+    g.strokeStyle=INK(dark*0.35*r()); g.lineWidth=1+r()*2.5;
+    g.beginPath(); g.moveTo(x,y+3); g.quadraticCurveTo(x+6,y+10,x+14+r()*18, y+12+r()*26); g.stroke();
+  }
+  g.filter='none';
+  return c;
+}
+const MTN = [
+  mountainLayer(1, 640, 330, 0.0022, 0.16, 10),
+  mountainLayer(2, 760, 260, 0.0031, 0.30, 5),
+  mountainLayer(3, 900, 200, 0.0042, 0.55, 2),
+];
+function drawMountains(g, t, a, rise=1){
+  MTN.forEach((m,i)=>{ g.globalAlpha = a*sm(rise*1.4 - i*0.25);
+    g.drawImage(m, -200 - t*(2+i*3), (1-sm(rise*1.4-i*0.25))*60); });
+  g.globalAlpha=1;
+}
+function mist(g, t, a, y0=560){
+  for(let i=0;i<5;i++){
+    const x = ((i*530 + t*(18+i*7)) % (W+900)) - 450, y = y0 + i*70 + Math.sin(t*0.3+i)*14;
+    const gr = g.createRadialGradient(x,y,10,x,y,520);
+    gr.addColorStop(0, `rgba(240,233,214,${0.55*a})`); gr.addColorStop(1,'rgba(240,233,214,0)');
+    g.save(); g.translate(x,y); g.scale(1,0.22); g.translate(-x,-y);
+    g.fillStyle=gr; g.fillRect(x-520,y-520,1040,1040); g.restore();
+  }
+}
+
+// ---------- typography ----------
+function text(g, s, x, y, size, a, opts={}){
+  if(a<=0) return;
+  g.save();
+  g.font = `${opts.italic?'italic ':''}${opts.weight||500} ${size}px ${opts.sc?"'Cormorant SC'":"'Cormorant Garamond'"}, serif`;
+  g.textAlign = opts.align||'center'; g.textBaseline='alphabetic';
+  if(opts.spacing) g.letterSpacing = opts.spacing+'px';
+  const col = opts.color || INK;
+  // brush-reveal: horizontal wipe with soft edge
+  const wv = opts.wipe ?? 1;
+  const mw = g.measureText(s).width;
+  const left = opts.align==='left' ? x : opts.align==='right' ? x-mw : x-mw/2;
+  if (wv < 1){
+    const edge = left - 60 + (mw+120)*eo(wv);
+    const gr = g.createLinearGradient(edge-60,0,edge,0);
+    gr.addColorStop(0, col(a)); gr.addColorStop(1, col(0));
+    g.fillStyle = gr;
+  } else g.fillStyle = col(a);
+  g.filter = 'blur(0.35px)';
+  g.fillText(s, x, y);
+  g.restore();
+}
+function sceneTag(g, num, label, a){
+  if(a<=0) return;
+  seal(g, 118, 92, 58, num, a, 30);
+  text(g, label, 168, 104, 34, a*0.85, {align:'left', sc:true, weight:600, spacing:3});
+}
+function seal(g, x, y, s, label, a, fs){
+  if(a<=0) return;
+  g.save(); g.globalAlpha=a; g.globalCompositeOperation='multiply';
+  g.translate(x,y); g.rotate(-0.03);
+  g.fillStyle=VERM(0.92); g.beginPath();
+  const r=rng(label.length*17+s);
+  for(let i=0;i<=40;i++){ const side=Math.floor(i/10)%4, f=(i%10)/10, h=s/2, j=()=> (r()-0.5)*2.2;
+    const pts=[[-h+f*s,-h],[h,-h+f*s],[h-f*s,h],[-h,h-f*s]][side]; i?g.lineTo(pts[0]+j(),pts[1]+j()):g.moveTo(pts[0],pts[1]); }
+  g.fill();
+  g.globalCompositeOperation='source-over';
+  g.fillStyle='rgba(240,228,205,0.95)'; g.font=`700 ${fs||s*0.42}px 'Cormorant Garamond', serif`;
+  g.textAlign='center'; g.textBaseline='middle'; g.fillText(label,0,2);
+  // worn speckles
+  g.fillStyle='rgba(236,226,202,0.55)';
+  for(let i=0;i<26;i++){ g.beginPath(); g.arc((r()-0.5)*s*0.95,(r()-0.5)*s*0.95,r()*1.8,0,7); g.fill(); }
+  g.restore();
+}
+function flowDots(g, P, t, speed, n, color, rad, a){
+  for(let i=0;i<n;i++){ const d=((t*speed + i*P.total/n) % P.total); const [x,y]=pointAt(P,d);
+    g.fillStyle=color(a*(0.5+0.5*Math.sin(i*1.3))); g.beginPath(); g.arc(x,y,rad,0,7); g.fill(); }
+}
+
+// ================= SCENES =================
+// --- S0: title (0–7.5) ---
+const titleStroke = bezierPts([[560,600],[760,588],[980,596],[1200,590],[1360,598]], 80);
+function S0(g,t,a){
+  drawMountains(g, t, a, pr(t,0,3.5));
+  mist(g, t, a, 600);
+  blob(g, 1500, 250, 70, VERM, 0.55*a*sm(pr(t,0.6,2.6)), 3, 6); // sun
+  text(g, 'The Hidden Veins', W/2, 470, 128, a*sm(pr(t,1.2,2.6)), {wipe:pr(t,1.2,3.0), weight:500, italic:true});
+  brush(g, titleStroke, eo(pr(t,2.6,3.8)), 10, INK, {seed:4, alpha:0.8});
+  text(g, 'Why MEP is one of the fastest-growing sectors in construction', W/2, 670, 44, a*sm(pr(t,3.4,4.6)), {wipe:pr(t,3.4,5.0)});
+  text(g, 'MECHANICAL  ·  ELECTRICAL  ·  PLUMBING', W/2, 740, 28, a*0.75*sm(pr(t,4.4,5.4)), {sc:true, spacing:6, weight:600});
+  seal(g, 1470, 440, 86, 'MEP', a*sm(pr(t,4.8,5.3)), 34);
+}
+
+// --- S1: every building has a body (7–17) ---
+const TW = {x0:800, x1:1120, y0:150, y1:960};
+const towerL = line(TW.x0,TW.y1,TW.x0+6,TW.y0,14,5,21), towerR = line(TW.x1,TW.y1,TW.x1-6,TW.y0,14,5,22);
+const towerT = line(TW.x0-10,TW.y0+4,TW.x1+10,TW.y0-2,8,3,23), ground = line(560,TW.y1+6,1360,TW.y1+2,20,5,24);
+const floors = Array.from({length:11},(_,i)=> line(TW.x0+12, TW.y0+70+i*68, TW.x1-12, TW.y0+70+i*68, 6, 3, 30+i));
+const duct = bezierPts([[860,940],[860,820],[1060,800],[1060,640],[860,620],[860,460],[1060,440],[1060,260],[960,220]],140);
+const wire = bezierPts([[1000,950],[1000,900],[900,860],[1020,760],[900,700],[1020,600],[900,520],[1020,420],[920,330],[1000,240]],140);
+const pipe = bezierPts([[940,955],[940,870],[1080,780],[840,690],[1080,560],[840,470],[1080,370],[880,280],[940,200]],140);
+function S1(g,t,a){
+  g.save(); g.globalAlpha=a;
+  sceneTag(g, '·', 'Every building has a body', sm(pr(t,0.3,1.2)));
+  brush(g, ground, eo(pr(t,0.2,1.2)), 9, INK, {seed:5});
+  brush(g, towerL, eo(pr(t,0.5,1.8)), 11, INK, {seed:6});
+  brush(g, towerR, eo(pr(t,0.7,2.0)), 11, INK, {seed:7});
+  brush(g, towerT, eo(pr(t,1.6,2.3)), 10, INK, {seed:8});
+  floors.forEach((f,i)=> brush(g, f, eo(pr(t,1.8+i*0.06,2.6+i*0.06)), 2.2, INK, {seed:40+i, alpha:0.35, dry:0.8}));
+  // the three systems
+  brush(g, duct, eo(pr(t,2.8,4.6)), 22, INK, {seed:12, alpha:0.38, dry:0.3});
+  brush(g, pipe, eo(pr(t,3.6,5.4)), 9, INDIGO, {seed:13, alpha:0.9});
+  brush(g, wire, eo(pr(t,4.4,6.2)), 4, VERM, {seed:14, alpha:0.9, dry:0.2});
+  if(t>4.6) flowDots(g, duct, t, 120, 14, (x)=>`rgba(250,246,236,${x})`, 4, sm(pr(t,4.6,5.4)));
+  if(t>5.4) flowDots(g, pipe, t, 180, 16, INDIGO, 3.5, sm(pr(t,5.4,6.0)));
+  if(t>6.2) flowDots(g, wire, t, 420, 10, VERM, 3, sm(pr(t,6.2,6.6)));
+  // labels
+  const lab = (y, head, sub, col, k, x, side) => {
+    const al = sm(pr(t,k,k+0.8));
+    const lx = side<0 ? 740 : 1180, ex = side<0 ? x-60 : x+60;
+    brush(g, line(side<0?lx:lx, y-12, side<0?ex+180:ex-180, y-12, 6, 2, k*10), eo(pr(t,k,k+0.6)), 2, col, {alpha:0.7, dry:0.6});
+    text(g, head, side<0? lx-20 : lx+20, y, 50, al, {align: side<0?'right':'left', italic:true, weight:700, color:col, wipe:pr(t,k,k+1)});
+    text(g, sub, side<0? lx-20 : lx+20, y+44, 30, al*0.85, {align: side<0?'right':'left', wipe:pr(t,k+0.2,k+1.2)});
+  };
+  lab(330, 'Mechanical', 'air · heating · cooling', INK, 4.6, 860, -1);
+  lab(560, 'Electrical', 'power · light · data', VERM, 5.6, 1060, 1);
+  lab(780, 'Plumbing', 'water · drainage · fire', INDIGO, 6.6, 860, -1);
+  text(g, 'The systems that make a building breathe, glow and flow.', W/2, 1040, 38, sm(pr(t,7.4,8.4)), {italic:true, wipe:pr(t,7.4,8.8)});
+  g.restore();
+}
+
+// --- S2: cities rising (16.5–26) ---
+const SKY = (() => { const r=rng(202), arr=[]; let x=140;
+  while(x<1780){ const w=60+r()*110, h=150+r()*330*(1-Math.abs(x-960)/1600); arr.push({x, w, h, d:r()*1.6, win:r()}); x+=w+8+r()*26; }
+  return arr; })();
+function S2(g,t,a){
+  g.save(); g.globalAlpha=a;
+  sceneTag(g, 'I', 'Cities keep rising', sm(pr(t,0.3,1.2)));
+  const base=930;
+  mist(g, t, 0.6, 880);
+  SKY.forEach((b,i)=>{
+    const k = eo(pr(t, 0.6+b.d, 2.6+b.d)); if(k<=0) return;
+    const h=b.h*k, top=base-h;
+    const gr=g.createLinearGradient(0,top,0,base);
+    const dark = 0.18 + 0.5*b.win;
+    gr.addColorStop(0, INK(dark)); gr.addColorStop(1, INK(dark*0.25));
+    g.save(); g.filter='blur(1.2px)'; g.fillStyle=gr; g.fillRect(b.x, top, b.w, h); g.restore();
+    brush(g, line(b.x, base, b.x, top, 6, 2, i+300), 1, 3, INK, {seed:i, alpha:0.55, dry:0.7});
+    brush(g, line(b.x+b.w, base, b.x+b.w, top, 6, 2, i+400), 1, 2, INK, {seed:i+1, alpha:0.35, dry:0.8});
+    // cranes on some
+    if(b.win>0.78 && k>0.98){ const cx=b.x+b.w*0.5, ct=top; const ka=sm(pr(t,3+b.d,3.8+b.d));
+      brush(g, line(cx, ct, cx, ct-120, 4, 1, i+500), ka, 3, INK, {alpha:0.6});
+      brush(g, line(cx-70, ct-115, cx+130, ct-118, 4, 1, i+600), ka, 3, INK, {alpha:0.6});
+      brush(g, line(cx+110, ct-118, cx+110, ct-40, 3, 1, i+700), ka, 1.4, INK, {alpha:0.5}); }
+  });
+  brush(g, line(80,base+4,1840,base,30,5,909), eo(pr(t,0.2,1.4)), 8, INK, {seed:9});
+  const k = sm(pr(t,3.6,4.6));
+  const n = Math.round(lerp(0,68,eo(pr(t,3.6,5.6))));
+  text(g, n+'%', W/2, 300, 190, k, {weight:700, color:VERM});
+  text(g, 'of humanity is expected to live in cities by 2050', W/2, 370, 44, sm(pr(t,4.4,5.4)), {italic:true, wipe:pr(t,4.4,6)});
+  text(g, 'Every new tower, hospital and metro line needs its veins.', W/2, 1035, 36, sm(pr(t,6.4,7.4)), {wipe:pr(t,6.4,7.8)});
+  text(g, 'source: UN DESA, World Urbanization Prospects', 1840, 1060, 20, 0.6*sm(pr(t,5,6)), {align:'right', italic:true});
+  g.restore();
+}
+
+// --- S3: decarbonisation (25.5–35.5) ---
+const plume = Array.from({length:22},(_,i)=>({o:i/22, s:i*13.7}));
+const roof = line(1080,560,1290,430,8,3,51), roof2=line(1290,430,1500,560,8,3,52);
+const wallL = line(1110,555,1110,800,8,3,53), wallR=line(1470,555,1470,800,8,3,54), floorH=line(1060,802,1530,802,10,3,55);
+const panels = Array.from({length:4},(_,i)=> line(1120+i*42,560-i*26-8, 1155+i*42, 538-i*26-8, 3, 1, 60+i));
+function S3(g,t,a){
+  g.save(); g.globalAlpha=a;
+  sceneTag(g, 'II', 'Buildings must decarbonise', sm(pr(t,0.3,1.2)));
+  // left: smokestack plume that fades as the right side greens
+  const fade = 1 - 0.85*sm(pr(t,4.5,7));
+  brush(g, line(380,860,384,560,6,3,70), eo(pr(t,0.4,1.2)), 26, INK, {alpha:0.7});
+  brush(g, line(250,862,560,860,10,3,71), eo(pr(t,0.2,1)), 7, INK);
+  plume.forEach(p=>{ const life = ((t*0.12 + p.o) % 1); const y = 540 - life*420, x = 384 + life*260 + Math.sin(p.s+t)*30*life;
+    blob(g, x, y, 24+life*90, INK, 0.16*(1-life)*fade*sm(pr(t,0.8,2)), p.s, 14); });
+  // right: green house — heat pump, solar, EV
+  [roof,roof2,wallL,wallR,floorH].forEach((p,i)=> brush(g, p, eo(pr(t,1.2+i*0.25,2.2+i*0.25)), 8, INK, {seed:80+i}));
+  panels.forEach((p,i)=> brush(g, p, eo(pr(t,3+i*0.12,3.6+i*0.12)), 14, INDIGO, {alpha:0.75, dry:0.2}));
+  blob(g, 1590, 300, 60, VERM, 0.6*sm(pr(t,2.6,3.6)), 9, 5);
+  // heat pump box with spinning fan
+  const hp = sm(pr(t,3.6,4.4));
+  if(hp>0){ g.save(); g.globalAlpha=a*hp; brush(g, line(1500,800,1500,700,3,1,90),1,4,INK); brush(g, line(1500,700,1600,700,3,1,91),1,4,INK);
+    brush(g, line(1600,700,1600,800,3,1,92),1,4,INK);
+    g.translate(1550,750); g.rotate(t*4); g.strokeStyle=INK(0.7); g.lineWidth=4;
+    for(let i=0;i<3;i++){ g.rotate(Math.PI*2/3); g.beginPath(); g.moveTo(0,0); g.quadraticCurveTo(14,-10,6,-30); g.stroke(); }
+    g.restore(); }
+  // EV charger + leaf
+  const ev = sm(pr(t,4.2,5));
+  if(ev>0){ brush(g, line(1200,800,1200,690,3,1,93), ev, 9, INK); blob(g,1200,680,10,VERM,0.8*ev,4,1);
+    brush(g, bezierPts([[1200,720],[1240,700],[1262,740],[1250,780],[1290,800]],30), ev, 3, INK, {alpha:0.7}); }
+  text(g, '≈ 37%', 700, 300, 150, sm(pr(t,1.8,2.8)), {weight:700, color:VERM});
+  text(g, 'of global energy-related CO₂ comes from buildings', 700, 365, 38, sm(pr(t,2.4,3.4)), {italic:true, wipe:pr(t,2.4,4)});
+  text(g, 'Heat pumps · solar · EV charging · efficient HVAC — every retrofit runs through MEP.', W/2, 1010, 38, sm(pr(t,5.4,6.4)), {wipe:pr(t,5.4,7.2)});
+  text(g, 'source: UNEP Global Status Report for Buildings and Construction', 1840, 1060, 20, 0.6*sm(pr(t,3,4)), {align:'right', italic:true});
+  g.restore();
+}
+
+// --- S4: data centres & AI (35–45) ---
+const curve = bezierPts([[240,880],[420,860],[600,830],[780,770],[920,690],[1040,560],[1120,430]],100);
+const bolt = prepPath([[1560,230],[1500,360],[1560,360],[1490,500]]);
+function S4(g,t,a){
+  g.save(); g.globalAlpha=a;
+  sceneTag(g, 'III', 'Data centres & AI', sm(pr(t,0.3,1.2)));
+  // racks
+  for(let r=0;r<2;r++) for(let c=0;c<6;c++){
+    const x=1240+c*92, y=600+r*170, k=eo(pr(t,0.5+(c+r*6)*0.07,1.3+(c+r*6)*0.07)); if(k<=0) continue;
+    g.save(); g.filter='blur(1px)'; g.fillStyle=INK(0.18+0.08*((c+r)%2)); g.fillRect(x, y+150*(1-k), 72, 150*k); g.restore();
+    brush(g, line(x,y+150,x,y+150-150*k,4,1,c*7+r), 1, 3, INK, {alpha:0.6});
+    for(let l=0;l<6;l++){ const on = noise1(t*3+c*5+r*11+l*1.7)>0.55; if(k>0.95){
+      g.fillStyle = on ? VERM(0.85) : INK(0.25); g.fillRect(x+10, y+14+l*22, on?14:8, 4); } }
+  }
+  brush(g, line(1200,926,1800,924,12,3,123), eo(pr(t,0.3,1)), 7, INK);
+  // cooling flow above racks
+  const ca = sm(pr(t,2,3));
+  for(let i=0;i<4;i++){ const pts=[]; for(let x=1230;x<=1800;x+=20) pts.push([x, 540-i*26 + Math.sin(x*0.02 - t*3 + i)*10]);
+    brush(g, prepPath(pts), ca, 3, INDIGO, {alpha:0.55, seed:i}); }
+  brush(g, bolt, eo(pr(t,2.6,3.2)), 18, VERM, {alpha:0.9, dry:0.2});
+  // rising curve
+  brush(g, line(240,900,1160,900,14,3,131), eo(pr(t,0.4,1.2)), 4, INK, {alpha:0.6});
+  brush(g, line(240,900,240,400,10,3,132), eo(pr(t,0.4,1.2)), 4, INK, {alpha:0.6});
+  brush(g, curve, eo(pr(t,1.2,3.6)), 12, INK, {seed:19});
+  if(t>3.6) seal(g, 1120, 420, 70, '2×', sm(pr(t,3.6,4)), 34);
+  text(g, '2024', 260, 940, 28, sm(pr(t,1,2)), {italic:true});
+  text(g, '2030', 1120, 940, 28, sm(pr(t,3,4)), {italic:true});
+  text(g, 'Data-centre electricity demand', 700, 260, 56, sm(pr(t,1.4,2.4)), {weight:700, italic:true, wipe:pr(t,1.4,3)});
+  text(g, 'projected to more than double by 2030', 700, 320, 40, sm(pr(t,2.2,3.2)), {italic:true, wipe:pr(t,2.2,3.8)});
+  text(g, 'Every rack needs power, cooling and backup — all engineered by MEP.', W/2, 1035, 38, sm(pr(t,5,6)), {wipe:pr(t,5,6.8)});
+  text(g, 'source: IEA, Energy and AI (2025)', 1840, 1065, 20, 0.6*sm(pr(t,3,4)), {align:'right', italic:true});
+  g.restore();
+}
+
+// --- S5: smart & healthy (44.5–53) ---
+const NODES = (() => { const r=rng(505), n=[]; for(let i=0;i<26;i++) n.push([520+r()*880, 220+r()*620, r()]); return n; })();
+const EDGES = (() => { const e=[]; NODES.forEach((p,i)=>{ const d=NODES.map((q,j)=>[Math.hypot(p[0]-q[0],p[1]-q[1]),j]).sort((a,b)=>a[0]-b[0]); e.push([i,d[1][1]],[i,d[2][1]],[i,d[3][1]]); }); return e; })();
+function S5(g,t,a){
+  g.save(); g.globalAlpha=a;
+  sceneTag(g, 'IV', 'Smarter, healthier buildings', sm(pr(t,0.3,1.2)));
+  // faint building silhouette
+  g.save(); g.globalAlpha = a*0.5*sm(pr(t,0.2,1.2));
+  brush(g, line(500,900,500,200,10,4,151),1,8,INK,{alpha:0.35}); brush(g, line(1420,900,1420,200,10,4,152),1,8,INK,{alpha:0.35});
+  brush(g, line(480,200,1440,200,10,4,153),1,8,INK,{alpha:0.35}); brush(g, line(420,904,1500,902,12,4,154),1,8,INK,{alpha:0.5});
+  g.restore();
+  EDGES.forEach(([i,j],k)=>{ const p=NODES[i], q=NODES[j];
+    brush(g, line(p[0],p[1],q[0],q[1],4,2,k+800), eo(pr(t,1+k*0.03,1.8+k*0.03)), 2, INK, {alpha:0.45, dry:0.6}); });
+  NODES.forEach((p,i)=>{ const k=sm(pr(t,0.8+i*0.04,1.3+i*0.04)); const pulse=0.6+0.4*Math.sin(t*3+i);
+    blob(g,p[0],p[1],8+p[2]*8, i%5===0?VERM:INK, 0.7*k*pulse, i, 2); });
+  const words=['Sensors','Automation','Clean air','BIM','Prefabrication','Energy monitoring'];
+  words.forEach((w,i)=>{ const x = i%2 ? 1560 : 360, y = 330 + Math.floor(i/2)*190;
+    text(g, w, x, y, 52, sm(pr(t,2.4+i*0.5,3.2+i*0.5)), {italic:true, weight:700, align: i%2?'left':'right', color: i===3?VERM:INK, wipe:pr(t,2.4+i*0.5,3.6+i*0.5)}); });
+  text(g, 'Buildings are becoming intelligent — and MEP is their nervous system.', W/2, 1010, 38, sm(pr(t,5.6,6.6)), {wipe:pr(t,5.6,7.4)});
+  g.restore();
+}
+
+// --- S6: skills gap (52.5–59.5) ---
+function figure(g, x, y, s, k, seed){
+  if(k<=0) return;
+  blob(g, x, y-s*1.25, s*0.22, INK, 0.85*k, seed, 1);
+  brush(g, bezierPts([[x,y-s],[x-3,y-s*0.5],[x+2,y]],20), k, s*0.18, INK, {seed});
+  brush(g, bezierPts([[x-s*0.35,y-s*0.6],[x,y-s*0.85],[x+s*0.38,y-s*0.55]],20), k, s*0.08, INK, {seed:seed+1});
+  brush(g, line(x,y,x-s*0.25,y+s*0.7,3,1,seed), k, s*0.1, INK); brush(g, line(x,y,x+s*0.25,y+s*0.7,3,1,seed+3), k, s*0.1, INK);
+}
+function S6(g,t,a){
+  g.save(); g.globalAlpha=a;
+  sceneTag(g, 'V', 'The talent gap', sm(pr(t,0.3,1.2)));
+  // many buildings (demand) on right
+  for(let i=0;i<18;i++){ const x=880+i*54, h=140+fbm(i*0.9+3)*360, k=eo(pr(t,0.5+i*0.06,1.4+i*0.06)); if(k<=0) continue;
+    g.save(); g.filter='blur(1px)'; g.fillStyle=INK(0.22+((i*7)%5)*0.06); g.fillRect(x, 820-h*k, 44, h*k); g.restore(); }
+  brush(g, line(200,822,1860,820,24,4,161), eo(pr(t,0.2,1.2)), 7, INK);
+  // few figures on left
+  [[340,0.8],[470,1.4],[600,2.0]].forEach(([x,d],i)=> figure(g, x, 720, 86, sm(pr(t,d,d+0.7)), 170+i*5));
+  text(g, 'Demand is outpacing skilled', W/2, 300, 64, sm(pr(t,2.4,3.4)), {weight:700, italic:true, wipe:pr(t,2.4,4)});
+  text(g, 'MEP engineers & technicians', W/2, 380, 64, sm(pr(t,3,4)), {weight:700, italic:true, color:VERM, wipe:pr(t,3,4.6)});
+  text(g, 'Which makes it one of construction’s strongest career bets.', W/2, 960, 40, sm(pr(t,4.4,5.4)), {italic:true, wipe:pr(t,4.4,6)});
+  g.restore();
+}
+
+// --- S7: closing (59–66) ---
+function S7(g,t,a){
+  g.save(); g.globalAlpha=a;
+  drawMountains(g, t, 1, pr(t,0,2.5));
+  const sunY = 420 - eo(pr(t,0.5,4))*140;
+  blob(g, W/2, sunY, 110, VERM, 0.55*sm(pr(t,0.5,2)), 21, 8);
+  mist(g, t+20, 1, 620);
+  text(g, 'The future is built on', W/2, 520, 86, sm(pr(t,1.6,2.8)), {italic:true, wipe:pr(t,1.6,3.2)});
+  text(g, 'what you cannot see.', W/2, 620, 96, sm(pr(t,2.6,3.8)), {italic:true, weight:700, wipe:pr(t,2.6,4.2)});
+  seal(g, W/2, 760, 92, 'MEP', sm(pr(t,4,4.4)), 36);
+  g.restore();
+}
+
+// ---------- timeline ----------
+const SCENES = [
+  [S0, 0, 7.5], [S1, 7, 17], [S2, 16.5, 26], [S3, 25.5, 35.5],
+  [S4, 35, 45], [S5, 44.5, 53], [S6, 52.5, 59.5], [S7, 59, 66]
+];
+function inkTransition(g, t){
+  // a drifting ink bloom over each scene boundary
+  SCENES.slice(1).forEach(([_,s],i)=>{ const k = pr(t, s-0.6, s+1.2); if(k<=0||k>=1) return;
+    const a = Math.sin(k*Math.PI)*0.10;
+    blob(g, W*(0.3+0.4*((i*37)%10)/10), H*0.5, 300+k*900, INK, a, i+50, 60); });
+}
+function render(t){
+  ctx.save(); ctx.filter='none'; ctx.globalAlpha=1; ctx.globalCompositeOperation='source-over';
+  ctx.drawImage(paper,0,0);
+  ctx.globalCompositeOperation='multiply';
+  // a living wash in the background
+  blob(ctx, 300+Math.sin(t*0.1)*80, 900, 380, INK, 0.035, 2, 80);
+  blob(ctx, 1650, 180+Math.cos(t*0.08)*60, 300, INK, 0.03, 3, 80);
+  for(const [fn,s,e] of SCENES){
+    if(t<s || t>e) continue;
+    const a = sm(pr(t,s,s+0.6)) * (1 - sm(pr(t,e-0.6,e)));
+    if (fn===S7) { fn(ctx, t-s, sm(pr(t,s,s+0.6)) * (1 - sm(pr(t,e-0.8,e)))); continue; }
+    fn(ctx, t-s, a);
+  }
+  inkTransition(ctx, t);
+  ctx.restore();
+  // fade from/to paper at very start/end
+  const edge = Math.max(1 - pr(t,0,0.6), pr(t,DURATION-0.8,DURATION));
+  if(edge>0){ ctx.globalAlpha = edge; ctx.drawImage(paper,0,0); ctx.globalAlpha=1; }
+}
+window.render = render;
+window.ready = document.fonts.ready.then(()=>Promise.all([
+  document.fonts.load("italic 500 40px 'Cormorant Garamond'"), document.fonts.load("italic 700 40px 'Cormorant Garamond'"),
+  document.fonts.load("500 40px 'Cormorant Garamond'"), document.fonts.load("700 40px 'Cormorant Garamond'"),
+  document.fonts.load("600 40px 'Cormorant SC'")])).then(()=>{ render(0); return true; });
+</script>
+</body></html>
